@@ -1,4 +1,4 @@
-# Olive DB - LSM Tree Key-Value Database
+# Simple LSM DB - LSM Tree Key-Value Database
 
 **A learning project** to understand LSM tree internals and client-server architecture. Not intended for production use.
 
