@@ -50,7 +50,7 @@ impl<'a> TryFrom<&'a [u8]> for Command<'a> {
             }),
             Some(unknown) => Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
-                format!("Unknown command: {:?}", unknown),
+                format!("Unknown command: {:?}", String::from_utf8_lossy(unknown)),
             )),
             None => Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
