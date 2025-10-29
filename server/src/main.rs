@@ -1,9 +1,11 @@
 use std::io::{Read, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream};
+use std::sync::{Arc, Mutex};
 
 use protocol::Command;
 use thread_pool::ThreadPool;
 
+mod database;
 mod thread_pool;
 
 const THREAD_POOL_SIZE: usize = 4;
@@ -17,13 +19,13 @@ fn main() -> std::io::Result<()> {
 
     let listener = TcpListener::bind(LISTEN_ADDRESS)?;
     let pool = ThreadPool::new(THREAD_POOL_SIZE)?;
+    let database = Arc::new(Mutex::new(database::Database::new()?));
 
     for stream_result in listener.incoming() {
         match stream_result {
             Ok(stream) => {
-                if let Err(e) = pool.execute(move || {
-                    handle_connection(stream);
-                }) {
+                let database = Arc::clone(&database);
+                if let Err(e) = pool.execute(move || handle_connection(stream, database)) {
                     tracing::error!("Failed to execute task in thread pool: {}", e);
                 }
             }
@@ -38,7 +40,7 @@ fn main() -> std::io::Result<()> {
     Ok(())
 }
 
-fn handle_connection(mut stream: TcpStream) {
+fn handle_connection(mut stream: TcpStream, database: Arc<Mutex<database::Database>>) {
     let peer_addr = stream.peer_addr().ok();
     tracing::info!("New connection from {:?}", peer_addr);
 
@@ -57,24 +59,53 @@ fn handle_connection(mut stream: TcpStream) {
                 Ok(cmd) => {
                     tracing::info!("Received command from {:?}: {:?}", peer_addr, cmd);
 
-                    // Send a simple acknowledgment response
-                    let response = match cmd {
-                        Command::Get { key } => {
-                            format!("OK: GET {:?}\n", String::from_utf8_lossy(key))
-                        }
-                        Command::Set { key, value } => {
-                            format!(
-                                "OK: SET {:?} = {:?}\n",
-                                String::from_utf8_lossy(key),
-                                String::from_utf8_lossy(value)
-                            )
-                        }
-                        Command::Delete { key } => {
-                            format!("OK: DELETE {:?}\n", String::from_utf8_lossy(key))
+                    let mut database = match database.lock() {
+                        Ok(db) => db,
+                        Err(error) => {
+                            tracing::error!("Failed to lock database: {}", error);
+                            return;
                         }
                     };
 
-                    if let Err(e) = stream.write_all(response.as_bytes()) {
+                    // Send a simple acknowledgment response
+                    let response = match cmd {
+                        Command::Get { key } => match database.get(key) {
+                            Ok(Some(value)) => {
+                                [b"OK: ".as_slice(), value.as_slice(), b"\n".as_slice()].concat()
+                            }
+                            Ok(None) => [b"OK: ".as_slice(), b"\n".as_slice()].concat(),
+                            Err(error) => {
+                                tracing::error!("Failed to get value from database: {}", error);
+                                [&b"ERROR: "[..], error.to_string().as_bytes(), &b"\n"[..]].concat()
+                            }
+                        },
+                        Command::Set { key, value } => match database.set(key, value) {
+                            Ok(_) => [&b"OK: "[..], &b"\n"[..]].concat(),
+                            Err(error) => {
+                                tracing::error!("Failed to set value in database: {}", error);
+                                [
+                                    b"ERROR: ".as_slice(),
+                                    error.to_string().as_bytes(),
+                                    b"\n".as_slice(),
+                                ]
+                                .concat()
+                            }
+                        },
+                        Command::Delete { key } => match database.delete(key) {
+                            Ok(_) => [b"OK: ".as_slice(), b"\n".as_slice()].concat(),
+                            Err(error) => {
+                                tracing::error!("Failed to delete value from database: {}", error);
+                                [
+                                    b"ERROR: ".as_slice(),
+                                    error.to_string().as_bytes(),
+                                    b"\n".as_slice(),
+                                ]
+                                .concat()
+                            }
+                        },
+                    };
+
+                    if let Err(e) = stream.write_all(&response) {
                         tracing::error!("Failed to write response to {:?}: {}", peer_addr, e);
                     }
                 }
