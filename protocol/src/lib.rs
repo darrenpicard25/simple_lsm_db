@@ -6,9 +6,9 @@ pub enum Command<'a> {
     Delete { key: &'a [u8] },
 }
 
-const GET: &[u8] = b"get";
-const SET: &[u8] = b"set";
-const DELETE: &[u8] = b"delete";
+const GET: &[u8] = b"GET";
+const SET: &[u8] = b"SET";
+const DELETE: &[u8] = b"DELETE";
 impl<'a> From<Command<'a>> for Vec<u8> {
     fn from(value: Command) -> Self {
         match value {

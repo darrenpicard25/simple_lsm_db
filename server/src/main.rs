@@ -33,6 +33,8 @@ fn main() -> std::io::Result<()> {
         }
     }
 
+    // TODO: Figure out graceful shutdown of the server
+
     Ok(())
 }
 
