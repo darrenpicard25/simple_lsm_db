@@ -2,7 +2,7 @@ use std::io::{Read, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
 
-use protocol::Command;
+use protocol::{Command, Response};
 use thread_pool::ThreadPool;
 
 mod database;
@@ -46,7 +46,6 @@ fn handle_connection(mut stream: TcpStream, database: Arc<Mutex<database::Databa
 
     let mut buffer = [0; 128];
 
-    // Read a single line
     match stream.read(&mut buffer) {
         Ok(0) => {
             tracing::info!("Connection closed by {:?}", peer_addr);
@@ -67,52 +66,38 @@ fn handle_connection(mut stream: TcpStream, database: Arc<Mutex<database::Databa
                         }
                     };
 
-                    // Send a simple acknowledgment response
                     let response = match cmd {
                         Command::Get { key } => match database.get(key) {
-                            Ok(Some(value)) => {
-                                [b"OK: ".as_slice(), value.as_slice(), b"\n".as_slice()].concat()
-                            }
-                            Ok(None) => [b"OK: ".as_slice(), b"\n".as_slice()].concat(),
+                            Ok(possible_value) => Response::Ok(possible_value),
                             Err(error) => {
                                 tracing::error!("Failed to get value from database: {}", error);
-                                [&b"ERROR: "[..], error.to_string().as_bytes(), &b"\n"[..]].concat()
+                                Response::Err(error.to_string())
                             }
                         },
                         Command::Set { key, value } => match database.set(key, value) {
-                            Ok(_) => [&b"OK: "[..], &b"\n"[..]].concat(),
+                            Ok(_) => Response::Success,
                             Err(error) => {
                                 tracing::error!("Failed to set value in database: {}", error);
-                                [
-                                    b"ERROR: ".as_slice(),
-                                    error.to_string().as_bytes(),
-                                    b"\n".as_slice(),
-                                ]
-                                .concat()
+                                Response::Err(error.to_string())
                             }
                         },
                         Command::Delete { key } => match database.delete(key) {
-                            Ok(_) => [b"OK: ".as_slice(), b"\n".as_slice()].concat(),
+                            Ok(_) => Response::Success,
                             Err(error) => {
                                 tracing::error!("Failed to delete value from database: {}", error);
-                                [
-                                    b"ERROR: ".as_slice(),
-                                    error.to_string().as_bytes(),
-                                    b"\n".as_slice(),
-                                ]
-                                .concat()
+                                Response::Err(error.to_string())
                             }
                         },
                     };
 
-                    if let Err(e) = stream.write_all(&response) {
+                    if let Err(e) = stream.write_all(Vec::<u8>::from(response).as_slice()) {
                         tracing::error!("Failed to write response to {:?}: {}", peer_addr, e);
                     }
                 }
                 Err(e) => {
-                    tracing::warn!("Invalid command from {:?}: {}", peer_addr, e);
-                    let error_msg = format!("ERROR: {}\n", e);
-                    if let Err(e) = stream.write_all(error_msg.as_bytes()) {
+                    tracing::error!("Invalid command from {:?}: {}", peer_addr, e);
+                    let response = Response::Err(e.to_string());
+                    if let Err(e) = stream.write_all(Vec::<u8>::from(response).as_slice()) {
                         tracing::error!("Failed to write error to {:?}: {}", peer_addr, e);
                     }
                 }

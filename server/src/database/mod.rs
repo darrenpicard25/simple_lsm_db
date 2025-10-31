@@ -1,51 +1,23 @@
+mod entry;
+use entry::Entry;
 use std::fs::{DirBuilder, File};
 use std::io::{BufRead, BufReader, Seek, SeekFrom, Write};
-
-#[derive(Debug)]
-enum Entry<'a> {
-    KeyValue { key: &'a [u8], value: &'a [u8] },
-    Tombstone { key: &'a [u8] },
-}
-
-impl<'a> TryFrom<&'a [u8]> for Entry<'a> {
-    type Error = std::io::Error;
-
-    fn try_from(value: &'a [u8]) -> Result<Self, Self::Error> {
-        let mut parts = value.splitn(2, |&b| b == b' ');
-
-        let key = parts.next().ok_or(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "Missing key",
-        ))?;
-
-        match parts.next() {
-            Some(value) => Ok(Entry::KeyValue { key, value }),
-            None => Ok(Entry::Tombstone { key }),
-        }
-    }
-}
-
-impl<'a> From<Entry<'a>> for Vec<u8> {
-    fn from(value: Entry<'a>) -> Self {
-        match value {
-            Entry::KeyValue { key, value } => [key, b" ", value, b"\n"].concat(),
-            Entry::Tombstone { key } => [key, b"\n"].concat(),
-        }
-    }
-}
+use std::path::PathBuf;
 
 pub struct Database {
+    set_count: usize,
+    database_dir: PathBuf,
     file: File,
 }
 
 impl Database {
     pub fn new() -> std::io::Result<Self> {
         // Create directory in tmp
-        let temp_dir = std::env::temp_dir().join("simple_lsm_db");
-        DirBuilder::new().recursive(true).create(&temp_dir)?;
+        let database_dir = std::env::temp_dir().join("simple_lsm_db");
+        DirBuilder::new().recursive(true).create(&database_dir)?;
 
         // Create a single file in that directory
-        let file_path = temp_dir.join("data.db");
+        let file_path = database_dir.clone().join("data.db");
         let file = File::options()
             .read(true)
             .write(true)
@@ -53,7 +25,11 @@ impl Database {
             .append(true)
             .open(file_path)?;
 
-        Ok(Database { file })
+        Ok(Database {
+            file,
+            database_dir,
+            set_count: 0,
+        })
     }
 
     pub fn get(&mut self, key: &[u8]) -> std::io::Result<Option<Vec<u8>>> {
@@ -65,8 +41,6 @@ impl Database {
         for line in reader.lines() {
             let line = line?;
             let entry = Entry::try_from(line.as_bytes())?;
-
-            dbg!("Entry: {:?}", &entry);
 
             match entry {
                 Entry::KeyValue {
@@ -88,6 +62,8 @@ impl Database {
         self.file.seek(SeekFrom::End(0))?;
         let entry = Entry::KeyValue { key, value };
         self.file.write(Vec::<u8>::from(entry).as_slice())?;
+        self.set_count += 1;
+
         Ok(())
     }
 
