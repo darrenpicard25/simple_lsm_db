@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 pub struct Worker {
-    id: usize,
+    _id: usize,
     pub(super) thread: Option<std::thread::JoinHandle<()>>,
 }
 
@@ -30,7 +30,7 @@ impl Worker {
         });
 
         Self {
-            id,
+            _id: id,
             thread: Some(thread),
         }
     }

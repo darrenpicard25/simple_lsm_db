@@ -1,11 +1,12 @@
 use std::io::{Read, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use protocol::{Command, Response};
+use server::database;
 use thread_pool::ThreadPool;
 
-mod database;
 mod thread_pool;
 
 const THREAD_POOL_SIZE: usize = 4;
@@ -19,7 +20,8 @@ fn main() -> std::io::Result<()> {
 
     let listener = TcpListener::bind(LISTEN_ADDRESS)?;
     let pool = ThreadPool::new(THREAD_POOL_SIZE)?;
-    let database = Arc::new(Mutex::new(database::Database::new()?));
+    let database_dir = std::env::temp_dir().join("simple_lsm_db");
+    let database = Arc::new(Mutex::new(database::Database::new(database_dir)?));
 
     for stream_result in listener.incoming() {
         match stream_result {
@@ -40,7 +42,7 @@ fn main() -> std::io::Result<()> {
     Ok(())
 }
 
-fn handle_connection(mut stream: TcpStream, database: Arc<Mutex<database::Database>>) {
+fn handle_connection(mut stream: TcpStream, database: Arc<Mutex<database::Database<PathBuf>>>) {
     let peer_addr = stream.peer_addr().ok();
     tracing::info!("New connection from {:?}", peer_addr);
 

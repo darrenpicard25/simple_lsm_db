@@ -1,4 +1,8 @@
-use std::{fs::File, io::Write, path::PathBuf};
+use std::{
+    fs::File,
+    io::Write,
+    path::{Path, PathBuf},
+};
 
 use crate::database::{entry::Entry, file_directory::InMemoryTable};
 
@@ -9,8 +13,8 @@ pub struct SegmentFiles {
 }
 
 impl SegmentFiles {
-    pub fn new(database_dir: &PathBuf) -> std::io::Result<Self> {
-        let mut segment_files = std::fs::read_dir(&database_dir)?
+    pub fn new<P: AsRef<Path>>(database_dir: P) -> std::io::Result<Self> {
+        let mut segment_files = std::fs::read_dir(database_dir)?
             .filter_map(Result::ok)
             .filter_map(|entry| {
                 entry
@@ -50,8 +54,12 @@ impl SegmentFiles {
         self.segment_files.iter().rev().map(|path| File::open(path))
     }
 
-    pub fn store(&mut self, directory_path: &PathBuf, map: &InMemoryTable) -> std::io::Result<()> {
-        let file_path = directory_path.join(format!(
+    pub fn store<P: AsRef<Path>>(
+        &mut self,
+        directory_path: P,
+        map: &InMemoryTable,
+    ) -> std::io::Result<()> {
+        let file_path = directory_path.as_ref().join(format!(
             "segment_{}{SEGMENT_FILE_EXTENSION}",
             self.segment_files.len()
         ));
@@ -64,7 +72,6 @@ impl SegmentFiles {
                 (key, None) => Entry::Tombstone { key },
             };
             file.write(Vec::<u8>::from(entry).as_slice())?;
-            file.write(b"\n")?;
         }
 
         self.segment_files.push(file_path);

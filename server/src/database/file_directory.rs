@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::fs::DirBuilder;
 use std::fs::File;
+use std::path::Path;
 use std::path::PathBuf;
 
 use crate::database::sstable::SegmentFiles;
@@ -8,22 +9,23 @@ use crate::database::wal::Wal;
 
 pub type InMemoryTable = BTreeMap<Vec<u8>, Option<Vec<u8>>>;
 
-pub struct FileDirectory {
-    database_dir: PathBuf,
+pub struct FileDirectory<P: AsRef<Path>> {
+    directory: P,
     segment_files: SegmentFiles,
     wal: Wal,
 }
 
-impl FileDirectory {
-    pub fn new() -> std::io::Result<Self> {
-        let database_dir = std::env::temp_dir().join("simple_lsm_db");
-        DirBuilder::new().recursive(true).create(&database_dir)?;
+impl<P: AsRef<Path> + Clone> FileDirectory<P> {
+    pub fn new(directory: P) -> std::io::Result<Self> {
+        DirBuilder::new()
+            .recursive(true)
+            .create(directory.clone())?;
 
-        let segment_files = SegmentFiles::new(&database_dir)?;
-        let wal = Wal::new(&database_dir)?;
+        let segment_files = SegmentFiles::new(directory.clone())?;
+        let wal = Wal::new(directory.clone())?;
 
         Ok(Self {
-            database_dir,
+            directory: directory.clone(),
             segment_files,
             wal,
         })
@@ -38,6 +40,6 @@ impl FileDirectory {
     }
 
     pub fn store_segment(&mut self, map: &InMemoryTable) -> std::io::Result<()> {
-        self.segment_files.store(&self.database_dir, map)
+        self.segment_files.store(&self.directory, map)
     }
 }

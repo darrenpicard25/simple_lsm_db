@@ -1,7 +1,7 @@
 use std::{
     fs::{File, OpenOptions},
     io::{BufRead, BufReader, Write},
-    path::PathBuf,
+    path::{Path, PathBuf},
 };
 
 use crate::database::{entry::Entry, file_directory::InMemoryTable};
@@ -11,21 +11,20 @@ pub struct Wal {
 }
 
 impl Wal {
-    pub fn new(database_dir: &PathBuf) -> std::io::Result<Self> {
+    pub fn new<P: AsRef<Path>>(database_dir: P) -> std::io::Result<Self> {
         let file = OpenOptions::new()
             .create(true)
             .append(true)
             .truncate(false)
             .read(true)
             .write(true)
-            .open(database_dir.join("wal.log"))?;
+            .open(database_dir.as_ref().join("wal.log"))?;
 
         Ok(Self { file })
     }
 
     pub fn append(&mut self, entry: Entry) -> std::io::Result<()> {
         self.file.write(Vec::<u8>::from(entry).as_slice())?;
-        self.file.write_all(b"\n")?;
         Ok(())
     }
 

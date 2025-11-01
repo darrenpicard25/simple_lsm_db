@@ -6,19 +6,20 @@ mod wal;
 use entry::Entry;
 use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader};
+use std::path::Path;
 
 use crate::database::file_directory::FileDirectory;
 
 const IN_MEMORY_TABLE_SIZE: usize = 5;
 
-pub struct Database {
-    file_directory: FileDirectory,
+pub struct Database<P: AsRef<Path> + Clone> {
+    file_directory: FileDirectory<P>,
     in_memory_table: BTreeMap<Vec<u8>, Option<Vec<u8>>>,
 }
 
-impl Database {
-    pub fn new() -> std::io::Result<Self> {
-        let mut file_directory = FileDirectory::new()?;
+impl<P: AsRef<Path> + Clone> Database<P> {
+    pub fn new(directory: P) -> std::io::Result<Self> {
+        let mut file_directory = FileDirectory::new(directory)?;
         let in_memory_table = file_directory.wal().read_in_memory_table()?;
 
         Ok(Database {
@@ -36,7 +37,7 @@ impl Database {
             let file = file?;
             let reader = BufReader::new(&file);
 
-            for line in reader.lines() {
+            'line: for line in reader.lines() {
                 let line = line?;
                 let entry = Entry::try_from(line.as_bytes())?;
 
@@ -44,13 +45,24 @@ impl Database {
                     Entry::KeyValue {
                         key: entry_key,
                         value: entry_value,
-                    } if entry_key == key => {
-                        return Ok(Some(entry_value.to_vec()));
+                    } => {
+                        if entry_key == key {
+                            return Ok(Some(entry_value.to_vec()));
+                        } else if entry_key > key {
+                            break; // Move to next file
+                        } else {
+                            continue 'line;
+                        }
                     }
-                    Entry::Tombstone { key: entry_key } if entry_key == key => {
-                        return Ok(None);
+                    Entry::Tombstone { key: entry_key } => {
+                        if entry_key == key {
+                            return Ok(None);
+                        } else if entry_key > key {
+                            break; // Move to next file
+                        } else {
+                            continue 'line;
+                        }
                     }
-                    _ => continue,
                 }
             }
         }
