@@ -1,10 +1,10 @@
 # Database Check list
 
-1. [] Update DB to support multiple SST files, even though at this point there will only ever be one. will need something in memory representing all files that is constructed on start up. Get logic should be updated to go through all files until it finds key
+1. [x] Update DB to support multiple SST files, even though at this point there will only ever be one. will need something in memory representing all files that is constructed on start up. Get logic should be updated to go through all files until it finds key
 
    - reminder even though all this exists we will have no code that creates multiple files. So there will only be 1 file
 
-2. [] Create in-memory BTree that flushes contents to disk (in-order) once certain size is reached
+2. [x] Create in-memory BTree that flushes contents to disk (in-order) once certain size is reached
 
    - flush should play well with step 1 on restart
    - do not worry about data in memory for crashes
