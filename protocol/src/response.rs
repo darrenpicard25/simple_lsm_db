@@ -1,3 +1,4 @@
+#[derive(Debug)]
 pub enum Response {
     Ok(Option<Vec<u8>>),
     Err(String),
@@ -10,7 +11,7 @@ impl From<Response> for Vec<u8> {
             Response::Ok(Some(value)) => {
                 [b"OK: ".as_slice(), value.as_slice(), b"\n".as_slice()].concat()
             }
-            Response::Ok(None) => [b"OK".as_slice(), b"\n".as_slice()].concat(),
+            Response::Ok(None) => [b"OK:".as_slice(), b"\n".as_slice()].concat(),
             Response::Err(error) => {
                 [b"ERROR: ".as_slice(), error.as_bytes(), b"\n".as_slice()].concat()
             }
