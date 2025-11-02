@@ -4,9 +4,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::database::{entry::Entry, file_directory::InMemoryTable};
+use crate::database::{bloom_filter::BloomFilter, entry::Entry, file_directory::InMemoryTable};
 
 const SEGMENT_FILE_EXTENSION: &str = ".sst";
+const BLOOM_FILTER_FILE_EXTENSION: &str = ".bf";
 
 pub struct SegmentFiles {
     segment_files: Vec<PathBuf>,
@@ -14,7 +15,9 @@ pub struct SegmentFiles {
 
 impl SegmentFiles {
     pub fn new<P: AsRef<Path>>(database_dir: P) -> std::io::Result<Self> {
-        let mut segment_files = std::fs::read_dir(database_dir)?
+        // Canonicalize the database directory to ensure consistent paths
+        let canonical_dir = std::fs::canonicalize(database_dir)?;
+        let mut segment_files = std::fs::read_dir(&canonical_dir)?
             .filter_map(Result::ok)
             .filter_map(|entry| {
                 entry
@@ -54,25 +57,42 @@ impl SegmentFiles {
         self.segment_files.iter().rev().map(|path| File::open(path))
     }
 
+    pub fn paths(&self) -> impl Iterator<Item = &PathBuf> {
+        self.segment_files.iter().rev()
+    }
+
     pub fn store<P: AsRef<Path>>(
         &mut self,
         directory_path: P,
         map: &InMemoryTable,
     ) -> std::io::Result<()> {
-        let file_path = directory_path.as_ref().join(format!(
-            "segment_{}{SEGMENT_FILE_EXTENSION}",
-            self.segment_files.len()
-        ));
+        let segment_number = self.segment_files.len();
+        // Ensure path is constructed consistently - use the same method as read_dir
+        let file_path = std::fs::canonicalize(directory_path.as_ref())?
+            .join(format!("segment_{}{SEGMENT_FILE_EXTENSION}", segment_number));
 
+        // Create bloom filter for this segment
+        let mut bloom_filter = BloomFilter::default_for_keys(map.len());
+
+        // Write segment file and build bloom filter
         let mut file = File::create(&file_path)?;
-
-        for entry in map.iter() {
-            let entry = match entry {
-                (key, Some(value)) => Entry::KeyValue { key, value },
-                (key, None) => Entry::Tombstone { key },
+        for (key, value) in map.iter() {
+            // Insert key into bloom filter (both KeyValue and Tombstone entries have keys)
+            bloom_filter.insert(key);
+            
+            let entry = match value {
+                Some(value) => Entry::KeyValue { key, value },
+                None => Entry::Tombstone { key },
             };
+            
             file.write(Vec::<u8>::from(entry).as_slice())?;
         }
+
+        // Write bloom filter file
+        let bloom_filter_path = std::fs::canonicalize(directory_path.as_ref())?
+            .join(format!("segment_{}{BLOOM_FILTER_FILE_EXTENSION}", segment_number));
+        let mut bloom_file = File::create(&bloom_filter_path)?;
+        bloom_file.write_all(&bloom_filter.serialize())?;
 
         self.segment_files.push(file_path);
 

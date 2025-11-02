@@ -1,3 +1,4 @@
+mod bloom_filter;
 mod entry;
 mod file_directory;
 mod sstable;
@@ -5,6 +6,7 @@ mod wal;
 
 use entry::Entry;
 use std::collections::BTreeMap;
+use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 
@@ -33,8 +35,15 @@ impl<P: AsRef<Path> + Clone> Database<P> {
             return Ok(value.clone());
         }
 
-        for file in self.file_directory.segment_files() {
-            let file = file?;
+        for path in self.file_directory.segment_paths() {
+            // Check bloom filter first to skip segments that definitely don't contain the key
+            if let Some(bloom_filter) = self.file_directory.get_bloom_filter(path) {
+                if !bloom_filter.might_contain(key) {
+                    continue; // Skip this segment - key definitely not present
+                }
+            }
+            // Bloom filter indicates key might exist, or no bloom filter available - scan the segment
+            let file = File::open(path)?;
             let reader = BufReader::new(&file);
 
             'line: for line in reader.lines() {

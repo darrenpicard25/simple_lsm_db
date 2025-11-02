@@ -69,13 +69,13 @@ mod tests {
 
         #[test]
         fn test_get_command_deserialization() {
-            let cmd = Command::try_from(b"get test".as_slice());
+            let cmd = Command::try_from(b"GET test".as_slice());
             assert!(matches!(cmd, Ok(Command::Get { key: b"test" })));
         }
 
         #[test]
         fn test_set_command_deserialization() {
-            let cmd = Command::try_from(b"set test value".as_slice());
+            let cmd = Command::try_from(b"SET test value".as_slice());
             assert!(matches!(
                 cmd,
                 Ok(Command::Set {
@@ -87,7 +87,7 @@ mod tests {
 
         #[test]
         fn test_delete_command_deserialization() {
-            let cmd = Command::try_from(b"delete test".as_slice());
+            let cmd = Command::try_from(b"DELETE test".as_slice());
             assert!(matches!(cmd, Ok(Command::Delete { key: b"test" })));
         }
 
@@ -98,7 +98,7 @@ mod tests {
             let err = cmd.unwrap_err();
             assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
             // The actual error message shows the unknown command as a byte array.
-            let expected = format!("Unknown command: {:?}", b"unknown");
+            let expected = format!("Unknown command: {:?}", "unknown");
             assert_eq!(err.to_string(), expected);
         }
     }
@@ -109,7 +109,7 @@ mod tests {
         #[test]
         fn test_get_command_serialization() {
             let cmd = Command::Get { key: b"test" };
-            assert_eq!(Vec::<u8>::from(cmd), b"get test".to_vec());
+            assert_eq!(Vec::<u8>::from(cmd), b"GET test".to_vec());
         }
 
         #[test]
@@ -118,13 +118,13 @@ mod tests {
                 key: b"test",
                 value: b"value",
             };
-            assert_eq!(Vec::<u8>::from(cmd), b"set test value".to_vec());
+            assert_eq!(Vec::<u8>::from(cmd), b"SET test value".to_vec());
         }
 
         #[test]
         fn test_delete_command_serialization() {
             let cmd = Command::Delete { key: b"test" };
-            assert_eq!(Vec::<u8>::from(cmd), b"delete test".to_vec());
+            assert_eq!(Vec::<u8>::from(cmd), b"DELETE test".to_vec());
         }
     }
 }

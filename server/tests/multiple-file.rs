@@ -36,14 +36,15 @@ fn insert_multiple_records_into_multiple_files() {
         .inspect(|file| println!("File: {:?}", file))
         .collect::<Vec<_>>();
 
-    assert_eq!(files.len(), 2);
+    assert_eq!(files.len(), 3);
     assert_eq!(files[0].clone().file_name().unwrap(), "wal.log");
-    assert_eq!(files[1].clone().file_name().unwrap(), "segment_0.sst");
+    assert_eq!(files[1].clone().file_name().unwrap(), "segment_0.bf");
+    assert_eq!(files[2].clone().file_name().unwrap(), "segment_0.sst");
 
     let wal_contents = std::fs::read_to_string(files[0].clone()).unwrap();
     assert_eq!(wal_contents, "");
 
-    let segment_contents = std::fs::read_to_string(files[1].clone()).unwrap();
+    let segment_contents = std::fs::read_to_string(files[2].clone()).unwrap();
     assert_eq!(
         segment_contents,
         "key1 value1\nkey2 value2\nkey3 value3\nkey4 value4\nkey5 value5\n"

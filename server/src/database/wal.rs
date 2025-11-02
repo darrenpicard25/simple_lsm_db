@@ -1,7 +1,7 @@
 use std::{
     fs::{File, OpenOptions},
     io::{BufRead, BufReader, Write},
-    path::{Path, PathBuf},
+    path::Path,
 };
 
 use crate::database::{entry::Entry, file_directory::InMemoryTable};
