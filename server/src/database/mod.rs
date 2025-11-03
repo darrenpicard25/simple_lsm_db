@@ -2,6 +2,9 @@ mod bloom_filter;
 mod bloom_filter_registry;
 mod entry;
 mod file_directory;
+mod index_entry;
+mod index_file;
+mod index_file_registry;
 mod mem_table;
 mod segment_file;
 mod segment_file_registry;
@@ -20,11 +23,11 @@ pub struct Database<P: AsRef<Path> + Clone> {
 }
 
 impl<P: AsRef<Path> + Clone> Database<P> {
-    pub fn new(directory: P) -> std::io::Result<Self> {
+    pub fn new(directory: P, max_table_size: Option<usize>) -> std::io::Result<Self> {
         let mut file_directory = FileDirectory::new(directory)?;
         // Collect valid WAL entries into a MemTable using FromIterator
         let wal_entries = file_directory.wal().entries()?.filter_map(Result::ok);
-        let mem_table = MemTable::from_iter(wal_entries);
+        let mem_table = MemTable::from_iter(wal_entries, max_table_size);
 
         Ok(Database {
             file_directory,
@@ -41,16 +44,34 @@ impl<P: AsRef<Path> + Clone> Database<P> {
             // Check bloom filter first to skip segments that definitely don't contain the key
             if let Some(bloom_filter) = self.file_directory.get_bloom_filter(segment_file.path()) {
                 if !bloom_filter.might_contain(key) {
-                    tracing::info!(
-                        "Bloom filter indicates key definitely not present in segment: {:?}",
-                        segment_file.path()
-                    );
-                    continue; // Skip this segment - key definitely not present
+                    continue;
                 }
             }
 
-            'line: for entry in segment_file.entries()? {
-                match entry? {
+            let starting_position = self
+                .file_directory
+                .get_index_file(segment_file.path())
+                .and_then(|index_file| {
+                    index_file.entries().ok().and_then(|mut entry_file| {
+                        let mut position = 0_u64;
+
+                        while let Some(entry) = entry_file.next() {
+                            let entry = entry.ok()?;
+
+                            if entry.key() > key {
+                                return Some(position);
+                            }
+
+                            position = entry.offset();
+                        }
+
+                        None
+                    })
+                });
+
+            'line: for result in segment_file.entries(starting_position)? {
+                let (_, entry) = result?;
+                match entry {
                     Entry::KeyValue {
                         key: entry_key,
                         value,
@@ -96,6 +117,7 @@ impl<P: AsRef<Path> + Clone> Database<P> {
 
     fn flush(&mut self) -> std::io::Result<()> {
         tracing::info!("Flushing in-memory table to disk");
+
         self.file_directory.store_segment(self.mem_table.clone())?;
         self.file_directory.wal().clear()?;
         self.mem_table.clear();

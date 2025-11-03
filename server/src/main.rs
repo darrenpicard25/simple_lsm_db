@@ -21,7 +21,7 @@ fn main() -> std::io::Result<()> {
     let listener = TcpListener::bind(LISTEN_ADDRESS)?;
     let pool = ThreadPool::new(THREAD_POOL_SIZE)?;
     let database_dir = std::env::temp_dir().join("simple_lsm_db");
-    let database = Arc::new(Mutex::new(database::Database::new(database_dir)?));
+    let database = Arc::new(Mutex::new(database::Database::new(database_dir, None)?));
 
     for stream_result in listener.incoming() {
         match stream_result {

@@ -35,9 +35,15 @@ impl SegmentFileRegistry {
         file_path.set_extension(SEGMENT_FILE_EXTENSION);
 
         let segment_file = SegmentFile::create_and_store(file_path.clone(), map)?;
-        self.segment_files.push_front(segment_file);
+        self.segment_files.push_back(segment_file);
 
         Ok(file_path)
+    }
+
+    pub fn get(&self, file_path: &PathBuf) -> Option<&SegmentFile> {
+        self.segment_files
+            .iter()
+            .find(|file| file.path().file_stem() == file_path.file_stem())
     }
 
     pub fn files(&self) -> impl Iterator<Item = &SegmentFile> {

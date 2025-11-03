@@ -4,7 +4,7 @@ use tempfile::TempDir;
 #[test]
 fn test_large_scale() {
     let temp_dir = TempDir::new().unwrap();
-    let mut db = Database::new(temp_dir.path()).unwrap();
+    let mut db = Database::new(temp_dir.path(), Some(1000)).unwrap();
 
     for i in 0..=10_000 {
         db.set(

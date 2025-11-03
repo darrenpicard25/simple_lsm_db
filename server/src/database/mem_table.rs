@@ -50,6 +50,25 @@ impl MemTable {
     pub fn iter(&self) -> impl Iterator<Item = (&[u8], &Option<Vec<u8>>)> {
         self.table.iter().map(|(k, v)| (k.as_slice(), v))
     }
+
+    pub fn from_iter<T: IntoIterator<Item = Entry>>(
+        iter: T,
+        max_table_size: Option<usize>,
+    ) -> Self {
+        let mut table = Table::new();
+
+        for entry in iter {
+            match entry {
+                Entry::KeyValue { key, value } => table.insert(key, Some(value)),
+                Entry::Tombstone { key } => table.insert(key, None),
+            };
+        }
+
+        Self {
+            table,
+            max_table_size: max_table_size.unwrap_or(DEFAULT_MAX_TABLE_SIZE),
+        }
+    }
 }
 
 impl IntoIterator for MemTable {
@@ -65,23 +84,5 @@ impl IntoIterator for MemTable {
             Some(value) => Entry::KeyValue { key, value },
             None => Entry::Tombstone { key },
         })
-    }
-}
-
-impl<'a> FromIterator<Entry> for MemTable {
-    fn from_iter<T: IntoIterator<Item = Entry>>(iter: T) -> Self {
-        let mut table = Table::new();
-
-        for entry in iter {
-            match entry {
-                Entry::KeyValue { key, value } => table.insert(key, Some(value)),
-                Entry::Tombstone { key } => table.insert(key, None),
-            };
-        }
-
-        Self {
-            table,
-            max_table_size: DEFAULT_MAX_TABLE_SIZE,
-        }
     }
 }

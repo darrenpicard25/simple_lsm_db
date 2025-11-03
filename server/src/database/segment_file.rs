@@ -1,7 +1,7 @@
 use std::{
     cmp::Ordering,
     fs::File,
-    io::{BufRead, BufReader, Write},
+    io::{BufRead, BufReader, Seek, SeekFrom, Write},
     path::PathBuf,
 };
 
@@ -41,12 +41,28 @@ impl SegmentFile {
         &self.path
     }
 
-    pub fn entries(&self) -> std::io::Result<impl Iterator<Item = std::io::Result<Entry>>> {
+    pub fn entries(
+        &self,
+        start_position: Option<u64>,
+    ) -> std::io::Result<impl Iterator<Item = std::io::Result<(u64, Entry)>>> {
         let file = File::open(&self.path)?;
-        let reader = BufReader::new(file);
-        Ok(reader
-            .lines()
-            .map(|line| line.map(|line| Entry::from(line.as_bytes()))))
+        let mut position = 0_u64;
+        let mut reader = BufReader::new(file);
+
+        if let Some(start_position) = start_position {
+            reader.seek(SeekFrom::Start(start_position))?;
+            position = start_position;
+        }
+
+        Ok(reader.lines().map(move |line| {
+            let line = line?;
+            let length = (line.len() + 1) as u64;
+            let entry = Entry::from(line.as_bytes());
+            let line_start_position = position;
+            position += length;
+
+            Ok((line_start_position, entry))
+        }))
     }
 
     pub fn is_segment_file(path: &PathBuf) -> bool {
