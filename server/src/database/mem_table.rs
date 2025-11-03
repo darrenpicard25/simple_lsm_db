@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use crate::database::entry::Entry;
 
 pub type Table = BTreeMap<Vec<u8>, Option<Vec<u8>>>;
-const DEFAULT_MAX_TABLE_SIZE: usize = 5;
+const DEFAULT_MAX_TABLE_SIZE: usize = 1000;
 
 #[derive(Clone)]
 pub struct MemTable {
