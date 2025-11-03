@@ -1,77 +1,69 @@
 mod bloom_filter;
+mod bloom_filter_registry;
 mod entry;
 mod file_directory;
-mod sstable;
+mod mem_table;
+mod segment_file;
+mod segment_file_registry;
 mod wal;
 
 use entry::Entry;
-use std::collections::BTreeMap;
-use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::cmp::Ordering;
 use std::path::Path;
 
 use crate::database::file_directory::FileDirectory;
-
-const IN_MEMORY_TABLE_SIZE: usize = 5;
+use crate::database::mem_table::MemTable;
 
 pub struct Database<P: AsRef<Path> + Clone> {
     file_directory: FileDirectory<P>,
-    in_memory_table: BTreeMap<Vec<u8>, Option<Vec<u8>>>,
+    mem_table: MemTable,
 }
 
 impl<P: AsRef<Path> + Clone> Database<P> {
     pub fn new(directory: P) -> std::io::Result<Self> {
         let mut file_directory = FileDirectory::new(directory)?;
-        let in_memory_table = file_directory.wal().read_in_memory_table()?;
+        // Collect valid WAL entries into a MemTable using FromIterator
+        let wal_entries = file_directory.wal().entries()?.filter_map(Result::ok);
+        let mem_table = MemTable::from_iter(wal_entries);
 
         Ok(Database {
             file_directory,
-            in_memory_table,
+            mem_table,
         })
     }
 
     pub fn get(&mut self, key: &[u8]) -> std::io::Result<Option<Vec<u8>>> {
-        if let Some(value) = self.in_memory_table.get(key) {
+        if let Some(value) = self.mem_table.get(key) {
             return Ok(value.clone());
         }
 
-        for path in self.file_directory.segment_paths() {
+        for segment_file in self.file_directory.segment_files() {
             // Check bloom filter first to skip segments that definitely don't contain the key
-            if let Some(bloom_filter) = self.file_directory.get_bloom_filter(path) {
+            if let Some(bloom_filter) = self.file_directory.get_bloom_filter(segment_file.path()) {
                 if !bloom_filter.might_contain(key) {
+                    tracing::info!(
+                        "Bloom filter indicates key definitely not present in segment: {:?}",
+                        segment_file.path()
+                    );
                     continue; // Skip this segment - key definitely not present
                 }
             }
-            // Bloom filter indicates key might exist, or no bloom filter available - scan the segment
-            let file = File::open(path)?;
-            let reader = BufReader::new(&file);
 
-            'line: for line in reader.lines() {
-                let line = line?;
-                let entry = Entry::try_from(line.as_bytes())?;
-
-                match entry {
+            'line: for entry in segment_file.entries()? {
+                match entry? {
                     Entry::KeyValue {
                         key: entry_key,
-                        value: entry_value,
-                    } => {
-                        if entry_key == key {
-                            return Ok(Some(entry_value.to_vec()));
-                        } else if entry_key > key {
-                            break; // Move to next file
-                        } else {
-                            continue 'line;
-                        }
-                    }
-                    Entry::Tombstone { key: entry_key } => {
-                        if entry_key == key {
-                            return Ok(None);
-                        } else if entry_key > key {
-                            break; // Move to next file
-                        } else {
-                            continue 'line;
-                        }
-                    }
+                        value,
+                    } => match entry_key.as_slice().cmp(key) {
+                        Ordering::Equal => return Ok(Some(value.to_vec())),
+                        Ordering::Less => continue,
+                        Ordering::Greater => break 'line,
+                    },
+                    Entry::Tombstone { key: entry_key } => match entry_key.as_slice().cmp(key) {
+                        Ordering::Equal => return Ok(None),
+                        Ordering::Less => continue,
+                        Ordering::Greater => break 'line,
+                    },
                 }
             }
         }
@@ -80,29 +72,33 @@ impl<P: AsRef<Path> + Clone> Database<P> {
     }
 
     pub fn set(&mut self, key: &[u8], value: &[u8]) -> std::io::Result<()> {
-        self.file_directory
-            .wal()
-            .append(Entry::KeyValue { key, value })?;
-        self.in_memory_table
-            .insert(key.to_vec(), Some(value.to_vec()));
-        if self.in_memory_table.len() >= IN_MEMORY_TABLE_SIZE {
-            tracing::info!("Flushing in-memory table to disk");
-            self.file_directory.store_segment(&self.in_memory_table)?;
-            self.file_directory.wal().clear()?;
-            self.in_memory_table.clear();
+        self.file_directory.wal().append(Entry::KeyValue {
+            key: key.to_vec(),
+            value: value.to_vec(),
+        })?;
+        self.mem_table.insert(key, value);
+        if self.mem_table.should_flush() {
+            self.flush()?;
         }
         Ok(())
     }
 
     pub fn delete(&mut self, key: &[u8]) -> std::io::Result<()> {
-        self.file_directory.wal().append(Entry::Tombstone { key })?;
-        self.in_memory_table.insert(key.to_vec(), None);
-        if self.in_memory_table.len() >= IN_MEMORY_TABLE_SIZE {
-            tracing::info!("Flushing in-memory table to disk");
-            self.file_directory.store_segment(&self.in_memory_table)?;
-            self.file_directory.wal().clear()?;
-            self.in_memory_table.clear();
+        self.file_directory
+            .wal()
+            .append(Entry::Tombstone { key: key.to_vec() })?;
+        self.mem_table.remove(key);
+        if self.mem_table.should_flush() {
+            self.flush()?;
         }
+        Ok(())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        tracing::info!("Flushing in-memory table to disk");
+        self.file_directory.store_segment(self.mem_table.clone())?;
+        self.file_directory.wal().clear()?;
+        self.mem_table.clear();
         Ok(())
     }
 }

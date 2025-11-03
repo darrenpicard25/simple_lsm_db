@@ -1,10 +1,10 @@
 use std::{
     fs::{File, OpenOptions},
-    io::{BufRead, BufReader, Write},
+    io::{BufRead, BufReader, Seek, SeekFrom, Write},
     path::Path,
 };
 
-use crate::database::{entry::Entry, file_directory::InMemoryTable};
+use crate::database::entry::Entry;
 
 pub struct Wal {
     file: File,
@@ -24,6 +24,7 @@ impl Wal {
     }
 
     pub fn append(&mut self, entry: Entry) -> std::io::Result<()> {
+        self.file.seek(SeekFrom::End(0))?;
         self.file.write(Vec::<u8>::from(entry).as_slice())?;
         Ok(())
     }
@@ -33,21 +34,12 @@ impl Wal {
         Ok(())
     }
 
-    pub fn read_in_memory_table(&mut self) -> std::io::Result<InMemoryTable> {
-        let mut in_memory_table = InMemoryTable::new();
+    pub fn entries(&mut self) -> std::io::Result<impl Iterator<Item = std::io::Result<Entry>>> {
+        self.file.seek(SeekFrom::Start(0))?;
         let reader = BufReader::new(&self.file);
-        for line in reader.lines() {
-            let line = line?;
-            let entry = Entry::try_from(line.as_bytes())?;
-            match entry {
-                Entry::KeyValue { key, value } => {
-                    in_memory_table.insert(key.to_vec(), Some(value.to_vec()));
-                }
-                Entry::Tombstone { key } => {
-                    in_memory_table.insert(key.to_vec(), None);
-                }
-            }
-        }
-        Ok(in_memory_table)
+        Ok(reader.lines().map(|line| {
+            line.map(|line| Entry::from(line.as_bytes()))
+                .map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, error))
+        }))
     }
 }
